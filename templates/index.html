@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StintEngine — F1 Strategy Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@300;400;600&family=IBM+Plex+Sans:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/dashboard.css?v=2">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<!-- ═══ HEADER ═══ -->
+<div class="header">
+    <div class="header-left">
+        <div class="logo">STINT<span>ENGINE</span></div>
+        <div class="tag">// F1 RL Strategy Agent · Dashboard</div>
+    </div>
+    <div class="header-right">
+        <div id="deviceBadge" class="device-badge device-cpu">CPU</div>
+        <div class="status-indicator">
+            <div id="statusDot" class="status-dot"></div>
+            <span id="statusText">Idle</span>
+        </div>
+    </div>
+</div>
+
+<!-- ═══ DASHBOARD GRID ═══ -->
+<div class="dashboard">
+
+    <!-- ── Panel 1: Command Center ── -->
+    <div class="panel">
+        <div class="panel-header">
+            <div class="panel-title"><span class="accent">01</span> COMMAND CENTER</div>
+            <div class="panel-badge" style="background:var(--red-glow);color:var(--red);border:1px solid rgba(232,0,45,0.3)">CONTROL</div>
+        </div>
+
+        <div class="controls">
+            <div class="input-group">
+                <label>Steps</label>
+                <input type="number" id="timestepsInput" class="input-field" value="50000" step="10000" min="1000">
+            </div>
+            <div class="btn-group">
+                <button id="btnTrain" class="btn btn-primary" onclick="startTraining(false)">▶ TRAIN</button>
+                <button id="btnFinal" class="btn" onclick="startTraining(true)">FINAL 200K</button>
+                <button id="btnInfer" class="btn btn-green" onclick="runInference()">🏎 RUN RACE</button>
+            </div>
+        </div>
+
+        <div class="metrics-row">
+            <div class="metric-card">
+                <div class="metric-label">Timesteps</div>
+                <div id="metricTimesteps" class="metric-value">—</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Episodes</div>
+                <div id="metricEpisodes" class="metric-value blue">—</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Mean Reward</div>
+                <div id="metricReward" class="metric-value green">—</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Status</div>
+                <div id="metricStatus" class="metric-value">IDLE</div>
+            </div>
+        </div>
+
+        <div id="progressContainer" style="display:none">
+            <div class="progress-bar">
+                <div id="progressFill" class="progress-fill" style="width:0%"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Panel 2: Reward Curve ── -->
+    <div class="panel">
+        <div class="panel-header">
+            <div class="panel-title"><span class="accent">02</span> LEARNING CURVE</div>
+            <div class="panel-badge" style="background:var(--green-dim);color:var(--green);border:1px solid rgba(0,230,118,0.3)">LIVE</div>
+        </div>
+        <div class="chart-container">
+            <canvas id="rewardChart"></canvas>
+        </div>
+    </div>
+
+    <!-- ── Panel 3: Strategy Timeline ── -->
+    <div class="panel panel-full">
+        <div class="panel-header">
+            <div class="panel-title"><span class="accent">03</span> STRATEGY TIMELINE</div>
+            <div class="panel-badge" style="background:var(--yellow-dim);color:var(--yellow);border:1px solid rgba(255,214,0,0.3)">COMPARISON</div>
+        </div>
+        <div id="strategyContainer">
+            <div class="empty-state">
+                <div class="empty-state-icon">🏎️</div>
+                <div class="empty-state-text">Run a race to see strategy comparison</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Panel 4: Tyre Degradation ── -->
+    <div class="panel">
+        <div class="panel-header">
+            <div class="panel-title"><span class="accent">04</span> TYRE DEGRADATION</div>
+            <div class="panel-badge" style="background:var(--purple-dim);color:#ce93d8;border:1px solid rgba(170,0,255,0.3)">MODEL</div>
+        </div>
+        <div class="chart-container">
+            <canvas id="tyreChart"></canvas>
+        </div>
+        <div class="tyre-legend">
+            <div class="tyre-legend-item"><div class="tyre-legend-dot" style="background:var(--soft-color)"></div>Soft</div>
+            <div class="tyre-legend-item"><div class="tyre-legend-dot" style="background:var(--medium-color)"></div>Medium</div>
+            <div class="tyre-legend-item"><div class="tyre-legend-dot" style="background:#ccc"></div>Hard</div>
+        </div>
+    </div>
+
+    <!-- ── Panel 5: Telemetry Feed ── -->
+    <div class="panel">
+        <div class="panel-header">
+            <div class="panel-title"><span class="accent">05</span> TELEMETRY FEED</div>
+            <div class="panel-badge" style="background:var(--blue-dim);color:var(--blue);border:1px solid rgba(41,121,255,0.3)">DATA</div>
+        </div>
+        <div id="telemetryContainer">
+            <div class="empty-state">
+                <div class="empty-state-icon">📡</div>
+                <div class="empty-state-text">Awaiting race data...</div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- Toast notification -->
+<div id="toast" class="toast"></div>
+
+<script src="/static/dashboard.js?v=3"></script>
+</body>
+</html>

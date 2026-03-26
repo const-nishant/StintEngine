@@ -1,0 +1,31 @@
+# ─── Python ───
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# ─── StintEngine generated data ───
+cache/
+logs/
+models/
+plots/
+*.zip
+
+# ─── Environment ───
+.env
+.env.local
+
+# ─── IDE ───
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ─── OS ───
+.DS_Store
+Thumbs.db
+desktop.ini
