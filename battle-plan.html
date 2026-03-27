@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>F1 RL Strategy Agent — Battle Plan</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@300;400;600&family=IBM+Plex+Sans:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --red: #E8002D;
+    --red-dim: #7a0018;
+    --black: #080808;
+    --dark: #111111;
+    --card: #161616;
+    --border: #2a2a2a;
+    --text: #e0e0e0;
+    --muted: #666;
+    --green: #00e676;
+    --yellow: #FFD600;
+    --blue: #2979FF;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--black);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(255,255,255,0.012) 2px,
+      rgba(255,255,255,0.012) 4px
+    );
+    pointer-events: none;
+    z-index: 999;
+  }
+
+  .header {
+    border-bottom: 1px solid var(--border);
+    padding: 40px 48px 32px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .header::after {
+    content: 'F1';
+    position: absolute;
+    right: -20px;
+    top: -30px;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 280px;
+    color: rgba(232,0,45,0.04);
+    pointer-events: none;
+    line-height: 1;
+  }
+
+  .tag {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--red);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+
+  h1 {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: clamp(48px, 7vw, 88px);
+    line-height: 0.95;
+    letter-spacing: 2px;
+    color: #fff;
+  }
+
+  h1 span {
+    color: var(--red);
+  }
+
+  .subtitle {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    color: var(--muted);
+    margin-top: 14px;
+    letter-spacing: 1px;
+  }
+
+  .meta-bar {
+    display: flex;
+    gap: 32px;
+    margin-top: 24px;
+    flex-wrap: wrap;
+  }
+
+  .meta-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-family: 'IBM Plex Mono', monospace;
+    color: var(--muted);
+  }
+
+  .meta-item .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+  }
+
+  /* Stack overview */
+  .stack-bar {
+    display: flex;
+    gap: 8px;
+    padding: 20px 48px;
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+    background: var(--dark);
+  }
+
+  .stack-pill {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 3px;
+    letter-spacing: 0.5px;
+  }
+
+  .pill-red { background: rgba(232,0,45,0.15); color: #ff4d6d; border: 1px solid rgba(232,0,45,0.3); }
+  .pill-blue { background: rgba(41,121,255,0.12); color: #5c9bff; border: 1px solid rgba(41,121,255,0.3); }
+  .pill-green { background: rgba(0,230,118,0.1); color: #00e676; border: 1px solid rgba(0,230,118,0.25); }
+  .pill-yellow { background: rgba(255,214,0,0.1); color: #ffd600; border: 1px solid rgba(255,214,0,0.25); }
+  .pill-muted { background: rgba(255,255,255,0.05); color: #888; border: 1px solid rgba(255,255,255,0.1); }
+
+  /* Main layout */
+  .main {
+    padding: 40px 48px;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+    max-width: 1100px;
+  }
+
+  /* Phase headers */
+  .phase {
+    margin-top: 24px;
+    margin-bottom: 4px;
+  }
+
+  .phase-label {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .phase-num {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 13px;
+    letter-spacing: 3px;
+    color: var(--muted);
+  }
+
+  .phase-title {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 26px;
+    letter-spacing: 1px;
+    color: #fff;
+  }
+
+  .phase-time {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--red);
+    margin-left: auto;
+    letter-spacing: 1px;
+  }
+
+  .phase-line {
+    height: 1px;
+    background: linear-gradient(90deg, var(--red) 0%, transparent 100%);
+    margin-top: 8px;
+    margin-bottom: 16px;
+  }
+
+  /* Task cards */
+  .task {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-left: 3px solid transparent;
+    padding: 18px 20px;
+    display: grid;
+    grid-template-columns: 100px 1fr auto;
+    gap: 20px;
+    align-items: start;
+    transition: border-color 0.2s, background 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .task:hover {
+    background: #1c1c1c;
+    border-left-color: var(--red);
+  }
+
+  .task.setup { border-left-color: var(--blue); }
+  .task.code { border-left-color: var(--green); }
+  .task.train { border-left-color: var(--yellow); }
+  .task.viz { border-left-color: #aa00ff; }
+  .task.break-card { border-left-color: var(--muted); opacity: 0.6; }
+
+  .task-time {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    color: var(--muted);
+    white-space: nowrap;
+    padding-top: 2px;
+  }
+
+  .task-time strong {
+    display: block;
+    font-size: 15px;
+    color: var(--text);
+    font-weight: 600;
+    margin-bottom: 2px;
+  }
+
+  .task-duration {
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .task-body {}
+
+  .task-title {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 600;
+    font-size: 15px;
+    color: #fff;
+    margin-bottom: 6px;
+  }
+
+  .task-desc {
+    font-size: 13px;
+    color: #888;
+    line-height: 1.6;
+    margin-bottom: 10px;
+  }
+
+  .task-steps {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .task-steps li {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: #777;
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    line-height: 1.5;
+  }
+
+  .task-steps li::before {
+    content: '→';
+    color: var(--red);
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  .code-snippet {
+    background: #0d0d0d;
+    border: 1px solid #222;
+    border-radius: 4px;
+    padding: 10px 14px;
+    margin-top: 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11.5px;
+    color: #aaa;
+    line-height: 1.7;
+    overflow-x: auto;
+  }
+
+  .code-snippet .c { color: #444; }
+  .code-snippet .k { color: #ff7043; }
+  .code-snippet .s { color: #66bb6a; }
+  .code-snippet .f { color: #42a5f5; }
+  .code-snippet .n { color: #ce93d8; }
+
+  .badge {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 2px;
+    white-space: nowrap;
+    align-self: flex-start;
+    margin-top: 3px;
+    letter-spacing: 0.5px;
+  }
+
+  .badge-setup { background: rgba(41,121,255,0.15); color: #5c9bff; }
+  .badge-code { background: rgba(0,230,118,0.12); color: #00e676; }
+  .badge-train { background: rgba(255,214,0,0.12); color: #ffd600; }
+  .badge-viz { background: rgba(170,0,255,0.15); color: #ce93d8; }
+  .badge-break { background: rgba(255,255,255,0.05); color: #555; }
+  .badge-install { background: rgba(255,112,67,0.15); color: #ff7043; }
+
+  /* Deliverable box */
+  .deliverable {
+    margin: 32px 0 0;
+    background: linear-gradient(135deg, rgba(232,0,45,0.08) 0%, rgba(232,0,45,0.02) 100%);
+    border: 1px solid rgba(232,0,45,0.25);
+    padding: 28px 28px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .deliverable-title {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 22px;
+    letter-spacing: 2px;
+    color: var(--red);
+    grid-column: 1/-1;
+    margin-bottom: -8px;
+  }
+
+  .deliverable-item {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+
+  .deliverable-icon {
+    font-size: 20px;
+    margin-top: 2px;
+  }
+
+  .deliverable-item h4 {
+    font-size: 13px;
+    font-weight: 600;
+    color: #ddd;
+    margin-bottom: 3px;
+  }
+
+  .deliverable-item p {
+    font-size: 12px;
+    color: #666;
+    font-family: 'IBM Plex Mono', monospace;
+    line-height: 1.5;
+  }
+
+  /* Tips box */
+  .tips {
+    margin: 16px 0 40px;
+    background: var(--dark);
+    border: 1px solid var(--border);
+    padding: 20px 24px;
+  }
+
+  .tips-title {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 18px;
+    letter-spacing: 2px;
+    color: var(--yellow);
+    margin-bottom: 12px;
+  }
+
+  .tips-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .tip {
+    font-size: 12px;
+    font-family: 'IBM Plex Mono', monospace;
+    color: #666;
+    display: flex;
+    gap: 8px;
+  }
+
+  .tip::before { content: '⚑'; color: var(--yellow); flex-shrink: 0; }
+
+  /* Timeline strip */
+  .timeline-strip {
+    display: flex;
+    height: 8px;
+    border-radius: 4px;
+    overflow: hidden;
+    margin: 0 48px 32px;
+  }
+
+  .tl-setup { background: var(--blue); flex: 1.5; }
+  .tl-env { background: #00bcd4; flex: 2; }
+  .tl-agent { background: var(--green); flex: 2; }
+  .tl-train { background: var(--yellow); flex: 1.5; }
+  .tl-viz { background: #aa00ff; flex: 1.5; }
+  .tl-break { background: #222; flex: 0.5; }
+
+  .tl-legend {
+    display: flex;
+    gap: 20px;
+    margin: 8px 48px 32px;
+    flex-wrap: wrap;
+  }
+
+  .tl-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-family: 'IBM Plex Mono', monospace;
+    color: var(--muted);
+  }
+
+  .tl-dot {
+    width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0;
+  }
+
+  @media (max-width: 700px) {
+    .header, .main, .stack-bar, .timeline-strip, .tl-legend { padding-left: 20px; padding-right: 20px; }
+    .task { grid-template-columns: 80px 1fr; }
+    .badge { display: none; }
+    .deliverable { grid-template-columns: 1fr; }
+    .tips-list { grid-template-columns: 1fr; }
+    .tl-legend { margin-left: 20px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="tag">// Project Battle Plan · RL · FastF1</div>
+  <h1>PIT STOP<br><span>STRATEGY</span><br>AGENT</h1>
+  <div class="subtitle">Single-day build plan · Reinforcement Learning · Simulation</div>
+  <div class="meta-bar">
+    <div class="meta-item"><div class="dot" style="background:var(--red)"></div>8 hours total</div>
+    <div class="meta-item"><div class="dot" style="background:var(--green)"></div>Python + Gym + FastF1</div>
+    <div class="meta-item"><div class="dot" style="background:var(--yellow)"></div>PPO via stable-baselines3</div>
+    <div class="meta-item"><div class="dot" style="background:var(--blue)"></div>Difficulty: Intermediate</div>
+  </div>
+</div>
+
+<div class="stack-bar">
+  <span class="stack-pill pill-red">fastf1</span>
+  <span class="stack-pill pill-blue">gymnasium</span>
+  <span class="stack-pill pill-green">stable-baselines3</span>
+  <span class="stack-pill pill-yellow">pandas</span>
+  <span class="stack-pill pill-muted">numpy</span>
+  <span class="stack-pill pill-muted">matplotlib</span>
+  <span class="stack-pill pill-muted">plotly</span>
+  <span class="stack-pill pill-blue">torch (CPU ok)</span>
+</div>
+
+<div class="timeline-strip" style="margin-top:32px">
+  <div class="tl-setup"></div>
+  <div class="tl-env"></div>
+  <div class="tl-break"></div>
+  <div class="tl-agent"></div>
+  <div class="tl-train"></div>
+  <div class="tl-break"></div>
+  <div class="tl-viz"></div>
+</div>
+<div class="tl-legend">
+  <div class="tl-item"><div class="tl-dot" style="background:var(--blue)"></div>Setup</div>
+  <div class="tl-item"><div class="tl-dot" style="background:#00bcd4"></div>Environment</div>
+  <div class="tl-item"><div class="tl-dot" style="background:var(--green)"></div>RL Agent</div>
+  <div class="tl-item"><div class="tl-dot" style="background:var(--yellow)"></div>Training</div>
+  <div class="tl-item"><div class="tl-dot" style="background:#aa00ff"></div>Visualization</div>
+  <div class="tl-item"><div class="tl-dot" style="background:#222"></div>Breaks</div>
+</div>
+
+<div class="main">
+
+  <!-- PHASE 1 -->
+  <div class="phase">
+    <div class="phase-label">
+      <span class="phase-num">PHASE 01</span>
+      <span class="phase-title">Setup & Data Pull</span>
+      <span class="phase-time">9:00 AM — 10:30 AM</span>
+    </div>
+    <div class="phase-line"></div>
+  </div>
+
+  <div class="task setup">
+    <div class="task-time"><strong>9:00</strong><div class="task-duration">30 min</div></div>
+    <div class="task-body">
+      <div class="task-title">Install dependencies</div>
+      <div class="task-desc">Fresh venv, install everything you'll need. Don't skip pinning versions — sb3 and gym break each other often.</div>
+      <div class="code-snippet">
+<span class="k">pip</span> install fastf1 gymnasium stable-baselines3[extra]<br>
+<span class="k">pip</span> install pandas numpy matplotlib plotly<br>
+<span class="k">pip</span> install torch --index-url https://download.pytorch.org/whl/cpu
+      </div>
+    </div>
+    <div class="badge badge-install">INSTALL</div>
+  </div>
+
+  <div class="task setup">
+    <div class="task-time"><strong>9:30</strong><div class="task-duration">30 min</div></div>
+    <div class="task-body">
+      <div class="task-title">Pull race data with FastF1</div>
+      <div class="task-desc">Download 2023 Bahrain GP — it's a classic multi-stop race, perfect for strategy learning. Cache it so you're not re-downloading.</div>
+      <ul class="task-steps">
+        <li>Enable cache: <code>fastf1.Cache.enable_cache('./cache')</code></li>
+        <li>Load session: <code>fastf1.get_session(2023, 'Bahrain', 'R')</code></li>
+        <li>Call <code>session.load()</code> — takes ~2 min first time</li>
+        <li>Pull <code>session.laps</code> into a DataFrame</li>
+      </ul>
+      <div class="code-snippet">
+<span class="k">import</span> fastf1<br>
+fastf1.Cache.enable_cache(<span class="s">'./cache'</span>)<br>
+session = fastf1.get_session(<span class="n">2023</span>, <span class="s">'Bahrain'</span>, <span class="s">'R'</span>)<br>
+session.load()<br>
+laps = session.laps  <span class="c"># Your main DataFrame</span>
+      </div>
+    </div>
+    <div class="badge badge-setup">DATA</div>
+  </div>
+
+  <div class="task setup">
+    <div class="task-time"><strong>10:00</strong><div class="task-duration">30 min</div></div>
+    <div class="task-body">
+      <div class="task-title">Explore & clean the data</div>
+      <div class="task-desc">Understand what columns you have before building the env. Critical columns to inspect.</div>
+      <ul class="task-steps">
+        <li>Key columns: <code>LapNumber, Compound, TyreLife, LapTime, Position, Driver</code></li>
+        <li>Filter to one driver: start with Verstappen (<code>VER</code>)</li>
+        <li>Convert <code>LapTime</code> from timedelta to seconds float</li>
+        <li>Check for null tyre data (a few laps may be missing — fill forward)</li>
+        <li>Plot lap time vs tyre age per compound — you'll see the degradation curve</li>
+      </ul>
+    </div>
+    <div class="badge badge-setup">EDA</div>
+  </div>
+
+  <!-- PHASE 2 -->
+  <div class="phase">
+    <div class="phase-label">
+      <span class="phase-num">PHASE 02</span>
+      <span class="phase-title">Build the Gym Environment</span>
+      <span class="phase-time">10:30 AM — 12:30 PM</span>
+    </div>
+    <div class="phase-line"></div>
+  </div>
+
+  <div class="task code">
+    <div class="task-time"><strong>10:30</strong><div class="task-duration">30 min</div></div>
+    <div class="task-body">
+      <div class="task-title">Define state space & action space</div>
+      <div class="task-desc">This is the most important design decision. Keep it simple for Day 1.</div>
+      <ul class="task-steps">
+        <li><strong>State (observation):</strong> [current_lap, tyre_age, compound_encoded, lap_time_delta, position]</li>
+        <li><strong>Actions:</strong> 0 = Stay Out, 1 = Pit Soft, 2 = Pit Medium, 3 = Pit Hard</li>
+        <li>Use <code>gymnasium.spaces.Box</code> for observations, <code>Discrete(4)</code> for actions</li>
+        <li>Normalize all observation values to [0, 1] range</li>
+      </ul>
+    </div>
+    <div class="badge badge-code">DESIGN</div>
+  </div>
+
+  <div class="task code">
+    <div class="task-time"><strong>11:00</strong><div class="task-duration">45 min</div></div>
+    <div class="task-body">
+      <div class="task-title">Write the Environment class</div>
+      <div class="task-desc">Create <code>F1StrategyEnv(gymnasium.Env)</code> with the three required methods.</div>
+      <ul class="task-steps">
+        <li><code>reset()</code> — start lap 1, fresh tyres, mid-grid position</li>
+        <li><code>step(action)</code> — advance one lap, apply tyre deg, update position</li>
+        <li>If action = pit: add 20-25s pit stop time, reset tyre age to 0, change compound</li>
+        <li>Tyre deg model: each lap adds <code>base_deg * (1 + 0.03 * tyre_age)</code> to lap time</li>
+        <li>Reward = position gained this lap (negative = lost positions)</li>
+        <li>Episode ends at lap 57 (Bahrain race length)</li>
+      </ul>
+      <div class="code-snippet">
+<span class="k">class</span> <span class="n">F1StrategyEnv</span>(gymnasium.Env):<br>
+&nbsp;&nbsp;<span class="k">def</span> <span class="f">reset</span>(self): <span class="c"># lap=1, soft tyres, pos=10</span><br>
+&nbsp;&nbsp;<span class="k">def</span> <span class="f">step</span>(self, action): <span class="c"># advance 1 lap</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="c"># returns: obs, reward, done, truncated, info</span>
+      </div>
+    </div>
+    <div class="badge badge-code">CODE</div>
+  </div>
+
+  <div class="task code">
+    <div class="task-time"><strong>11:45</strong><div class="task-duration">45 min</div></div>
+    <div class="task-body">
+      <div class="task-title">Calibrate tyre degradation from real data</div>
+      <div class="task-desc">Don't hardcode deg values — fit them from the FastF1 data you pulled. This is what makes your sim realistic.</div>
+      <ul class="task-steps">
+        <li>Group laps by Compound, compute mean lap time per TyreAge bucket</li>
+        <li>Fit a simple linear or quadratic regression: <code>laptime = a + b*tyre_age + c*tyre_age²</code></li>
+        <li>Store coefficients per compound (Soft/Medium/Hard)</li>
+        <li>Use these coefficients inside your <code>step()</code> function</li>
+        <li>Quick sanity check: soft should degrade faster than hard</li>
+      </ul>
+    </div>
+    <div class="badge badge-code">DATA FIT</div>
+  </div>
+
+  <!-- BREAK -->
+  <div class="task break-card">
+    <div class="task-time"><strong>12:30</strong><div class="task-duration">30 min</div></div>
+    <div class="task-body">
+      <div class="task-title">🍛 Lunch Break</div>
+      <div class="task-desc">Step away. You've done the hardest part — the env. Your brain needs fuel for the training phase.</div>
+    </div>
+    <div class="badge badge-break">BREAK</div>
+  </div>
+
+  <!-- PHASE 3 -->
+  <div class="phase">
+    <div class="phase-label">
+      <span class="phase-num">PHASE 03</span>
+      <span class="phase-title">Train the RL Agent</span>
+      <span class="phase-time">1:00 PM — 3:30 PM</span>
+    </div>
+    <div class="phase-line"></div>
+  </div>
+
+  <div class="task train">
+    <div class="task-time"><strong>1:00</strong><div class="task-duration">20 min</div></div>
+    <div class="task-body">
+      <div class="task-title">Validate your environment</div>
+      <div class="task-desc">Before training, make sure the env doesn't crash. Run 10 random episodes manually.</div>
+      <ul class="task-steps">
+        <li>Use <code>gymnasium.utils.env_checker.check_env(env)</code> — fixes 90% of bugs</li>
+        <li>Run a random policy loop: <code>env.step(env.action_space.sample())</code></li>
+        <li>Print state & reward every lap — check they make sense</li>
+        <li>Verify episode terminates at lap 57, not before or after</li>
+      </ul>
+    </div>
+    <div class="badge badge-train">VALIDATE</div>
+  </div>
+
+  <div class="task train">
+    <div class="task-time"><strong>1:20</strong><div class="task-duration">30 min</div></div>
+    <div class="task-body">
+      <div class="task-title">Set up PPO training</div>
+      <div class="task-desc">3 lines of actual training code. The complexity is in tuning hyperparams, which you'll iterate on.</div>
+      <ul class="task-steps">
+        <li>Wrap env: <code>env = make_vec_env(F1StrategyEnv, n_envs=4)</code> — parallel training</li>
+        <li>Init: <code>model = PPO("MlpPolicy", env, verbose=1, learning_rate=3e-4)</code></li>
+        <li>Start with <code>model.learn(total_timesteps=50_000)</code> — runs in ~3 min</li>
+        <li>Watch reward in terminal — should trend upward after ~20k steps</li>
+      </ul>
+      <div class="code-snippet">
+<span class="k">from</span> stable_baselines3 <span class="k">import</span> PPO<br>
+<span class="k">from</span> stable_baselines3.common.env_util <span class="k">import</span> make_vec_env<br><br>
+env = make_vec_env(F1StrategyEnv, n_envs=<span class="n">4</span>)<br>
+model = PPO(<span class="s">"MlpPolicy"</span>, env, verbose=<span class="n">1</span>)<br>
+model.learn(total_timesteps=<span class="n">50_000</span>)<br>
+model.save(<span class="s">"f1_strategy_agent"</span>)
+      </div>
+    </div>
+    <div class="badge badge-train">TRAIN</div>
+  </div>
+
+  <div class="task train">
+    <div class="task-time"><strong>1:50</strong><div class="task-duration">40 min</div></div>
+    <div class="task-body">
+      <div class="task-title">Tune reward function</div>
+      <div class="task-desc">This is where you'll spend real time. If the agent pits every lap or never pits, your reward is wrong. Iterate fast.</div>
+      <ul class="task-steps">
+        <li>If agent never pits: add a tyre cliff penalty (if tyre_age > 25, big negative reward)</li>
+        <li>If agent pits every lap: add a pit cost (-25s equivalent in reward units)</li>
+        <li>Add a big end-of-race bonus proportional to finishing position: <code>+50 * (20 - final_pos)</code></li>
+        <li>Retrain after each reward change — takes only 3 min per run</li>
+        <li>Target: agent should do 2-3 pit stops total across 57 laps</li>
+      </ul>
+    </div>
+    <div class="badge badge-train">TUNE</div>
+  </div>
+
+  <div class="task train">
+    <div class="task-time"><strong>2:30</strong><div class="task-duration">30 min</div></div>
+    <div class="task-body">
+      <div class="task-title">Train final model — 200k timesteps</div>
+      <div class="task-desc">Once reward function feels right, do a longer training run while you take a short break.</div>
+      <ul class="task-steps">
+        <li>Set <code>total_timesteps=200_000</code> — runs ~10 min on CPU</li>
+        <li>Use TensorBoard callback to log reward: <code>TensorboardCallback()</code></li>
+        <li>Save model + keep a log of the reward curve</li>
+        <li>While training: sketch what plots you want in Phase 4</li>
+      </ul>
+    </div>
+    <div class="badge badge-train">FINAL RUN</div>
+  </div>
+
+  <!-- BREAK -->
+  <div class="task break-card">
+    <div class="task-time"><strong>3:00</strong><div class="task-duration">15 min</div></div>
+    <div class="task-body">
+      <div class="task-title">☕ Short Break</div>
+      <div class="task-desc">Let the model train. Coffee. Stretch. Come back fresh for visualization.</div>
+    </div>
+    <div class="badge badge-break">BREAK</div>
+  </div>
+
+  <!-- PHASE 4 -->
+  <div class="phase">
+    <div class="phase-label">
+      <span class="phase-num">PHASE 04</span>
+      <span class="phase-title">Visualize & Compare</span>
+      <span class="phase-time">3:15 PM — 5:00 PM</span>
+    </div>
+    <div class="phase-line"></div>
+  </div>
+
+  <div class="task viz">
+    <div class="task-time"><strong>3:15</strong><div class="task-duration">30 min</div></div>
+    <div class="task-body">
+      <div class="task-title">Run agent & record decisions</div>
+      <div class="task-desc">Load the trained model, run one full race episode, log every decision it makes.</div>
+      <ul class="task-steps">
+        <li>Load: <code>model = PPO.load("f1_strategy_agent")</code></li>
+        <li>Run episode, store: lap number, action taken, tyre compound, tyre age, position</li>
+        <li>Build a DataFrame of the agent's race</li>
+        <li>Also store the real Verstappen strategy from your FastF1 data for comparison</li>
+      </ul>
+    </div>
+    <div class="badge badge-viz">INFERENCE</div>
+  </div>
+
+  <div class="task viz">
+    <div class="task-time"><strong>3:45</strong><div class="task-duration">45 min</div></div>
+    <div class="task-body">
+      <div class="task-title">Build 3 key plots</div>
+      <div class="task-desc">Three focused visualizations that tell the story of what your agent learned.</div>
+      <ul class="task-steps">
+        <li><strong>Plot 1 — Strategy Timeline:</strong> Horizontal bar per compound stint, Agent vs. Real, coloured by compound (red=soft, yellow=medium, white=hard)</li>
+        <li><strong>Plot 2 — Position Over Laps:</strong> Line chart, Agent vs. Real driver, with pit lap markers as vertical dashed lines</li>
+        <li><strong>Plot 3 — Reward Curve:</strong> Training reward over timesteps — shows when the agent "figured it out"</li>
+      </ul>
+    </div>
+    <div class="badge badge-viz">PLOTS</div>
+  </div>
+
+  <div class="task viz">
+    <div class="task-time"><strong>4:30</strong><div class="task-duration">30 min</div></div>
+    <div class="task-body">
+      <div class="task-title">Bonus: test on a different race</div>
+      <div class="task-desc">Load 2023 Monaco GP or Monza GP data, re-run the agent without retraining. Does it generalize or does it break? That's your writeup conclusion.</div>
+      <ul class="task-steps">
+        <li>Pull a second race session with FastF1</li>
+        <li>Recalibrate tyre deg coefficients for the new circuit</li>
+        <li>Run agent on new env — note if strategy changes</li>
+        <li>Monaco should force fewer pit windows vs Bahrain (tire stress differs)</li>
+      </ul>
+    </div>
+    <div class="badge badge-viz">GENERALIZE</div>
+  </div>
+
+  <!-- Deliverables -->
+  <div class="deliverable">
+    <div class="deliverable-title">END OF DAY DELIVERABLES</div>
+    <div class="deliverable-item">
+      <div class="deliverable-icon">🤖</div>
+      <div>
+        <h4>Trained RL Agent</h4>
+        <p>PPO model that makes pit decisions across a 57-lap race</p>
+      </div>
+    </div>
+    <div class="deliverable-item">
+      <div class="deliverable-icon">🏎️</div>
+      <div>
+        <h4>Real F1 Simulation Env</h4>
+        <p>Gym env calibrated to actual 2023 Bahrain tyre data</p>
+      </div>
+    </div>
+    <div class="deliverable-item">
+      <div class="deliverable-icon">📊</div>
+      <div>
+        <h4>Strategy Comparison Plots</h4>
+        <p>Agent vs. real team strategy visualized side-by-side</p>
+      </div>
+    </div>
+    <div class="deliverable-item">
+      <div class="deliverable-icon">📈</div>
+      <div>
+        <h4>Learning Curve</h4>
+        <p>Reward progression showing when the agent discovered the undercut</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tips -->
+  <div class="tips">
+    <div class="tips-title">⚑ SURVIVAL TIPS</div>
+    <div class="tips-list">
+      <div class="tip">If FastF1 download stalls, use <code>fastf1.Cache.enable_cache()</code> before any session load</div>
+      <div class="tip">Gym version conflicts are common — pin <code>gymnasium==0.29.1</code></div>
+      <div class="tip">Start with just 1 compound (Medium only) to validate env, add others after</div>
+      <div class="tip">If reward doesn't improve after 50k steps, your reward scale is off (normalize it)</div>
+      <div class="tip">Use <code>n_envs=4</code> in make_vec_env — 4x faster training on CPU</div>
+      <div class="tip">Undercut discovered = agent pits 1-2 laps before opponent and gains position</div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>
