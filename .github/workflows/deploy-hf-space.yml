@@ -13,11 +13,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Remove README before push
+      - name: Remove frontend and unnecessary files
         run: |
-          rm README.md
+          rm -rf frontend static templates
+          rm -f README.md battle-plan.html
           git add -A
-          git commit --allow-empty -m "Remove README for HF Space deployment"
+          git commit --allow-empty -m "Remove frontend files for HF Space deployment"
 
       - name: Push to Hugging Face
         env:
