@@ -4,28 +4,25 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>StintEngine — F1 Strategy Dashboard</title>
-    <meta name="description" content="F1 Pit Stop Strategy RL Agent — Real-time training dashboard with tyre degradation models, telemetry replay, and strategy comparison.">
+    <link rel="icon" type="image/png" href="/static/logo.png">
+    <meta property="og:title" content="StintEngine — F1 AI Strategy">
+    <meta property="og:image" content="/static/logo.png">
+    <meta name="description" content="F1 Pit Stop Strategy RL Agent — Real-time training, weather simulation, and telemetry dashboard.">
     <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@300;400;600&family=IBM+Plex+Sans:wght@300;400;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="dashboard.css">
+    <link rel="stylesheet" href="/static/dashboard.css?v=5">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
-
-<!-- ═══ CONFIG BAR ═══ -->
-<div id="configBar" class="config-bar">
-    <label>API Backend:</label>
-    <input type="text" id="apiUrl" class="input-field" value="http://127.0.0.1:5000" style="width:260px; text-align:left;">
-    <button class="btn btn-primary" onclick="applyApiUrl()" style="padding:6px 12px;">CONNECT</button>
-    <span id="connStatus" class="conn-status">⚫ Disconnected</span>
-</div>
 
 <!-- ═══ HEADER ═══ -->
 <div class="header">
     <div class="header-left">
         <div class="logo">STINT<span>ENGINE</span></div>
-        <div class="tag">// F1 RL Strategy Agent · Dashboard</div>
+        <div class="tag">// F1 RL Strategy Agent · v2.0</div>
     </div>
     <div class="header-right">
+        <button id="btnSettings" class="btn btn-icon" onclick="openSettings()" title="Simulation Settings" style="margin-right: 15px; background: transparent; border: 1px solid rgba(255,255,255,0.2); font-size: 14px;">⚙️ SETTINGS</button>
+        <div id="weatherBadge" class="weather-badge weather-dry">☀️ DRY</div>
         <div id="deviceBadge" class="device-badge device-cpu">CPU</div>
         <div class="status-indicator">
             <div id="statusDot" class="status-dot"></div>
@@ -34,16 +31,15 @@
     </div>
 </div>
 
-<!-- ═══ DASHBOARD GRID ═══ -->
+<!-- ═══ DASHBOARD GRID (3-col) ═══ -->
 <div class="dashboard">
 
-    <!-- ── Panel 1: Command Center ── -->
-    <div class="panel">
+    <!-- ── 01: Command Center ── -->
+    <div class="panel" id="panelCommand">
         <div class="panel-header">
             <div class="panel-title"><span class="accent">01</span> COMMAND CENTER</div>
-            <div class="panel-badge" style="background:var(--red-glow);color:var(--red);border:1px solid rgba(232,0,45,0.3)">CONTROL</div>
+            <div class="panel-badge badge-red">CONTROL</div>
         </div>
-
         <div class="controls">
             <div class="input-group">
                 <label>Steps</label>
@@ -55,7 +51,6 @@
                 <button id="btnInfer" class="btn btn-green" onclick="runInference()">🏎 RUN RACE</button>
             </div>
         </div>
-
         <div class="metrics-row">
             <div class="metric-card">
                 <div class="metric-label">Timesteps</div>
@@ -74,30 +69,99 @@
                 <div id="metricStatus" class="metric-value">IDLE</div>
             </div>
         </div>
-
         <div id="progressContainer" style="display:none">
-            <div class="progress-bar">
-                <div id="progressFill" class="progress-fill" style="width:0%"></div>
+            <div class="progress-bar"><div id="progressFill" class="progress-fill" style="width:0%"></div></div>
+        </div>
+    </div>
+
+    <!-- ── 02: Learning Curve ── -->
+    <div class="panel">
+        <div class="panel-header">
+            <div class="panel-title"><span class="accent">02</span> LEARNING CURVE</div>
+            <div class="panel-badge badge-green">LIVE</div>
+        </div>
+        <div class="chart-container"><canvas id="rewardChart"></canvas></div>
+    </div>
+
+    <!-- ── 03: Race Summary ── -->
+    <div class="panel" id="panelSummary">
+        <div class="panel-header">
+            <div class="panel-title"><span class="accent">03</span> RACE SUMMARY</div>
+            <div class="panel-badge badge-purple">RESULT</div>
+        </div>
+        <div id="summaryContainer">
+            <div class="empty-state">
+                <div class="empty-state-icon">🏆</div>
+                <div class="empty-state-text">Complete a race to see results</div>
             </div>
         </div>
     </div>
 
-    <!-- ── Panel 2: Reward Curve ── -->
+    <!-- ── 04: Position Tracker ── -->
     <div class="panel">
         <div class="panel-header">
-            <div class="panel-title"><span class="accent">02</span> LEARNING CURVE</div>
-            <div class="panel-badge" style="background:var(--green-dim);color:var(--green);border:1px solid rgba(0,230,118,0.3)">LIVE</div>
+            <div class="panel-title"><span class="accent">04</span> POSITION TRACKER</div>
+            <div class="panel-badge badge-blue">LIVE</div>
         </div>
-        <div class="chart-container">
-            <canvas id="rewardChart"></canvas>
+        <div class="chart-container"><canvas id="positionChart"></canvas></div>
+    </div>
+
+    <!-- ── 05: Lap Time Delta ── -->
+    <div class="panel">
+        <div class="panel-header">
+            <div class="panel-title"><span class="accent">05</span> LAP TIME DELTA</div>
+            <div class="panel-badge badge-yellow">ANALYSIS</div>
+        </div>
+        <div class="chart-container"><canvas id="lapDeltaChart"></canvas></div>
+    </div>
+
+    <!-- ── 06: Fuel & Tyre Monitor ── -->
+    <div class="panel">
+        <div class="panel-header">
+            <div class="panel-title"><span class="accent">06</span> FUEL & TYRE</div>
+            <div class="panel-badge badge-orange">MONITOR</div>
+        </div>
+        <div id="gaugesContainer">
+            <div class="gauge-row">
+                <div class="gauge-item">
+                    <svg class="gauge-svg" viewBox="0 0 120 120">
+                        <circle class="gauge-bg" cx="60" cy="60" r="50"/>
+                        <circle class="gauge-fill" id="fuelGauge" cx="60" cy="60" r="50" style="stroke-dashoffset:314"/>
+                        <text class="gauge-text" x="60" y="55" id="fuelText">—</text>
+                        <text class="gauge-label" x="60" y="72">FUEL</text>
+                    </svg>
+                </div>
+                <div class="gauge-item">
+                    <svg class="gauge-svg" viewBox="0 0 120 120">
+                        <circle class="gauge-bg" cx="60" cy="60" r="50"/>
+                        <circle class="gauge-fill gauge-tyre" id="tyreGauge" cx="60" cy="60" r="50" style="stroke-dashoffset:314"/>
+                        <text class="gauge-text" x="60" y="55" id="tyreText">—</text>
+                        <text class="gauge-label" x="60" y="72">TYRE</text>
+                    </svg>
+                </div>
+            </div>
+            <div class="gauge-info">
+                <div class="gauge-info-item">
+                    <span class="gauge-info-label">Compound</span>
+                    <span id="monitorCompound" class="gauge-info-value">—</span>
+                </div>
+                <div class="gauge-info-item">
+                    <span class="gauge-info-label">Tyre Age</span>
+                    <span id="monitorTyreAge" class="gauge-info-value">—</span>
+                </div>
+                <div class="gauge-info-item">
+                    <span class="gauge-info-label">Weather</span>
+                    <span id="monitorWeather" class="gauge-info-value">☀️ Dry</span>
+                </div>
+            </div>
         </div>
     </div>
 
-    <!-- ── Panel 3: Strategy Timeline ── -->
+    <!-- ── 07: Strategy Timeline ── -->
     <div class="panel panel-full">
         <div class="panel-header">
-            <div class="panel-title"><span class="accent">03</span> STRATEGY TIMELINE</div>
-            <div class="panel-badge" style="background:var(--yellow-dim);color:var(--yellow);border:1px solid rgba(255,214,0,0.3)">COMPARISON</div>
+            <div class="panel-title"><span class="accent">07</span> STRATEGY TIMELINE</div>
+            <div class="panel-badge badge-yellow">COMPARISON</div>
         </div>
         <div id="strategyContainer">
             <div class="empty-state">
@@ -107,15 +171,46 @@
         </div>
     </div>
 
-    <!-- ── Panel 4: Tyre Degradation ── -->
+    <!-- ── 11: Track Visualization ── -->
+    <div class="panel panel-full" id="panelTrack">
+        <div class="panel-header">
+            <div class="panel-title"><span class="accent">11</span> CIRCUIT VIEW</div>
+            <div style="display:flex;align-items:center;gap:10px;">
+                <span id="trackLapBadge" class="track-lap-badge">LAP 0 / 57</span>
+                <div class="panel-badge badge-red">LIVE</div>
+            </div>
+        </div>
+        <div class="track-viz-wrapper">
+            <div class="track-canvas-container">
+                <canvas id="trackCanvas"></canvas>
+            </div>
+            <div class="track-sidebar">
+                <div class="track-info-card">
+                    <div class="track-info-label">Circuit</div>
+                    <div class="track-info-value" id="trackName">BAHRAIN</div>
+                </div>
+                <div class="track-info-card">
+                    <div class="track-info-label">Positions</div>
+                    <ul class="track-driver-list" id="trackDriverList">
+                        <li class="track-driver-item" style="color:var(--muted);font-size:9px;justify-content:center;padding:20px 0;">
+                            Awaiting race data...
+                        </li>
+                    </ul>
+                </div>
+                <div class="track-controls">
+                    <button class="btn" onclick="toggleTrackReplay()" id="btnReplay" disabled>▶ REPLAY</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── 08: Tyre Degradation ── -->
     <div class="panel">
         <div class="panel-header">
-            <div class="panel-title"><span class="accent">04</span> TYRE DEGRADATION</div>
-            <div class="panel-badge" style="background:var(--purple-dim);color:#ce93d8;border:1px solid rgba(170,0,255,0.3)">MODEL</div>
+            <div class="panel-title"><span class="accent">08</span> TYRE DEGRADATION</div>
+            <div class="panel-badge badge-purple">MODEL</div>
         </div>
-        <div class="chart-container">
-            <canvas id="tyreChart"></canvas>
-        </div>
+        <div class="chart-container"><canvas id="tyreChart"></canvas></div>
         <div class="tyre-legend">
             <div class="tyre-legend-item"><div class="tyre-legend-dot" style="background:var(--soft-color)"></div>Soft</div>
             <div class="tyre-legend-item"><div class="tyre-legend-dot" style="background:var(--medium-color)"></div>Medium</div>
@@ -123,11 +218,11 @@
         </div>
     </div>
 
-    <!-- ── Panel 5: Telemetry Feed ── -->
+    <!-- ── 09: Telemetry Feed ── -->
     <div class="panel">
         <div class="panel-header">
-            <div class="panel-title"><span class="accent">05</span> TELEMETRY FEED</div>
-            <div class="panel-badge" style="background:var(--blue-dim);color:var(--blue);border:1px solid rgba(41,121,255,0.3)">DATA</div>
+            <div class="panel-title"><span class="accent">09</span> TELEMETRY FEED</div>
+            <div class="panel-badge badge-blue">DATA</div>
         </div>
         <div id="telemetryContainer">
             <div class="empty-state">
@@ -137,11 +232,104 @@
         </div>
     </div>
 
+    <!-- ── 10: Race History ── -->
+    <div class="panel">
+        <div class="panel-header">
+            <div class="panel-title"><span class="accent">10</span> RACE HISTORY</div>
+            <div class="panel-badge badge-red">LOG</div>
+        </div>
+        <div id="historyContainer">
+            <div class="empty-state">
+                <div class="empty-state-icon">📋</div>
+                <div class="empty-state-text">No races recorded yet</div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- Race Loading Overlay -->
+<div id="raceLoadingOverlay" class="race-loading-overlay">
+    <div class="race-loading-title">RACE IN PROGRESS</div>
+    <div class="race-loading-sub">Simulating pit strategy</div>
+    <div class="race-track">
+        <div class="race-car">🏎️</div>
+    </div>
+    <div class="race-loading-lap" id="raceLoadingLap">LAP <span class="lap-num">0</span> / 57</div>
+    <div class="race-dots">
+        <span></span><span></span><span></span><span></span><span></span>
+    </div>
 </div>
 
 <!-- Toast notification -->
 <div id="toast" class="toast"></div>
 
-<script src="dashboard.js"></script>
+<!-- Settings Slide-out Panel -->
+<div id="settingsOverlay" class="settings-overlay" onclick="closeSettings()"></div>
+<div id="settingsPanel" class="settings-panel">
+    <div class="settings-header">
+        <div class="settings-title"><span class="accent">⚙️</span> SIMULATION SETTINGS</div>
+        <button class="btn btn-icon" onclick="closeSettings()" style="background: transparent; border: none; font-size: 16px;">✖</button>
+    </div>
+    
+    <div class="settings-content">
+        <div class="settings-section">
+            <div class="settings-section-title">Backend Connection</div>
+            <div class="input-group">
+                <label>API Base URL</label>
+                <input type="text" id="apiBaseInput" class="input-field" placeholder="http://127.0.0.1:5000">
+            </div>
+        </div>
+
+        <div class="settings-section">
+            <div class="settings-section-title">Race Configuration</div>
+            <div class="input-group">
+                <label>Track / Event</label>
+                <select id="trackInput" class="input-field"></select>
+            </div>
+            
+            <div class="input-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <div>
+                    <label>Year</label>
+                    <input type="number" id="yearInput" class="input-field" placeholder="e.g. 2023" value="2023">
+                </div>
+                <div>
+                    <label>Starting Grid Position</label>
+                    <input type="number" id="startPosInput" class="input-field" min="1" max="20" value="10">
+                </div>
+            </div>
+
+            <div class="input-group">
+                <label>Drivers (Comma Separated or Empty for All)</label>
+                <input type="text" id="driversInput" class="input-field" placeholder="e.g. VER, HAM, ALO" value="">
+            </div>
+        </div>
+
+        <div class="settings-section">
+            <div class="settings-section-title">Environment</div>
+            <div class="input-group">
+                <label>Weather Mode</label>
+                <select id="weatherModeInput" class="input-field">
+                    <option value="Random">Random</option>
+                    <option value="Force Dry">Force Dry</option>
+                    <option value="Force Rain">Force Rain</option>
+                </select>
+            </div>
+
+            <div class="input-group">
+                <label>Safety Car Probability: <span id="scProbLabel" class="accent">5%</span></label>
+                <input type="range" id="scProbInput" class="range-field" min="0" max="1" step="0.01" value="0.05" oninput="document.getElementById('scProbLabel').textContent = Math.round(this.value * 100) + '%'">
+            </div>
+        </div>
+    </div>
+
+    <div class="settings-footer">
+        <button class="btn" onclick="closeSettings()">CANCEL</button>
+        <button class="btn btn-primary" onclick="saveSettings()">SAVE & APPLY</button>
+    </div>
+</div>
+
+<script src="/static/tracks.js?v=1"></script>
+<script src="/static/dashboard.js?v=8"></script>
 </body>
 </html>

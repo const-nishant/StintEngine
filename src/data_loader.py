@@ -78,15 +78,17 @@ def get_race_data(year: int = RACE_YEAR, gp: str = RACE_GP, driver: str = REFERE
     return driver_laps
 
 
-def get_all_drivers_laps(year: int = RACE_YEAR, gp: str = RACE_GP) -> pd.DataFrame:
+def get_all_drivers_laps(year: int = RACE_YEAR, gp: str = RACE_GP, drivers: list = None) -> pd.DataFrame:
     """
-    Load cleaned laps for ALL drivers — needed for tyre model calibration.
+    Load cleaned laps for ALL drivers (or a selected subset) — needed for tyre model calibration.
     
     Returns:
-        Cleaned DataFrame of race laps for all drivers.
+        Cleaned DataFrame of race laps.
     """
     session = load_session(year, gp)
     laps = clean_laps(session.laps)
+    if drivers:
+        laps = laps[laps["Driver"].isin(drivers)].copy().reset_index(drop=True)
     return laps
 
 

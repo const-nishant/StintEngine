@@ -1,0 +1,42 @@
+name: Deploy Frontend to GitHub Pages
+
+on:
+  push:
+    branches: [ "master", "main" ]
+
+jobs:
+  deploy-gh-pages:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Required to push to the gh-pages branch
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build static frontend distribution
+        run: |
+          echo "Packaging frontend assets..."
+          mkdir -p dist
+          
+          # Copy the core dashboard and static scripts directly to the root of dist
+          cp templates/index.html dist/
+          cp static/* dist/
+          
+          # Copy extra HTML files if they exist
+          cp templates/*.html dist/ 2>/dev/null || true
+          cp *.html dist/ 2>/dev/null || true
+          
+          # Fix absolute path routing.
+          # GitHub pages serves from `<username>.github.io/<repo>/`
+          # so absolute paths like `/static/dashboard.js` resolve to `<username>.github.io/static/dashboard.js` (404)
+          # We convert `/static/` to relative `./` which works natively.
+          sed -i 's|/static/||g' dist/*.html
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
+          publish_branch: gh-pages
+          commit_message: "Deploy updated frontend to GitHub Pages"

@@ -18,6 +18,7 @@ from src.data_loader import get_all_drivers_laps
 from src.tyre_model import fit_tyre_degradation
 from src.config import (
     PPO_LEARNING_RATE, PPO_N_ENVS, PPO_POLICY,
+    PPO_BATCH_SIZE, PPO_N_STEPS,
     PPO_INITIAL_TIMESTEPS, PPO_FINAL_TIMESTEPS,
     MODEL_INITIAL, MODEL_FINAL, LOGS_DIR, DEVICE,
 )
@@ -73,9 +74,14 @@ class TrainingMetricsCallback(BaseCallback):
                         "timestep": self.num_timesteps,
                     })
 
-        # Save metrics every 2048 steps
-        if self.num_timesteps % 2048 == 0:
+        # Save metrics approx every 2048 steps
+        update_freq = 2048
+        if not hasattr(self, '_last_save'):
+            self._last_save = 0
+            
+        if self.num_timesteps - self._last_save >= update_freq:
             self._save()
+            self._last_save = self.num_timesteps
 
         return True
 
@@ -105,15 +111,17 @@ def load_tyre_coefficients():
     return coeffs
 
 
-def make_env_factory(tyre_coefficients):
+def make_env_factory(tyre_coefficients, env_kwargs=None):
     """Return a factory function that creates F1StrategyEnv with fitted coefficients."""
+    if env_kwargs is None:
+        env_kwargs = {}
     def _make():
-        return F1StrategyEnv(tyre_coefficients=tyre_coefficients)
+        return F1StrategyEnv(tyre_coefficients=tyre_coefficients, **env_kwargs)
     return _make
 
 
 def train(timesteps: int, model_path: Path, tyre_coefficients: dict,
-          resume_from: Path = None, callback_cls=None):
+          resume_from: Path = None, callback_cls=None, env_kwargs=None):
     """Train (or continue training) a PPO agent with GPU acceleration."""
     print(f"\n{'═' * 60}")
     print(f"  TRAINING — {timesteps:,} timesteps on {DEVICE.upper()}")
@@ -121,7 +129,7 @@ def train(timesteps: int, model_path: Path, tyre_coefficients: dict,
     print(f"{'═' * 60}\n")
 
     env = make_vec_env(
-        make_env_factory(tyre_coefficients),
+        make_env_factory(tyre_coefficients, env_kwargs),
         n_envs=PPO_N_ENVS,
     )
 
@@ -129,10 +137,17 @@ def train(timesteps: int, model_path: Path, tyre_coefficients: dict,
     CallbackClass = callback_cls or TrainingMetricsCallback
     callback = CallbackClass(log_path=metrics_path)
 
+    model = None
     if resume_from and resume_from.with_suffix(".zip").exists():
         print(f"  Resuming from: {resume_from}")
-        model = PPO.load(str(resume_from), env=env, device=DEVICE)
-    else:
+        try:
+            model = PPO.load(str(resume_from), env=env, device=DEVICE)
+        except ValueError as e:
+            print(f"  [Warning] Failed to load model ({e}).")
+            print("  Training from scratch instead.")
+            model = None
+
+    if model is None:
         model = PPO(
             PPO_POLICY,
             env,
@@ -140,8 +155,8 @@ def train(timesteps: int, model_path: Path, tyre_coefficients: dict,
             learning_rate=PPO_LEARNING_RATE,
             tensorboard_log=str(LOGS_DIR),
             device=DEVICE,
-            n_steps=2048,
-            batch_size=128,  # larger batch for GPU
+            n_steps=PPO_N_STEPS,
+            batch_size=PPO_BATCH_SIZE,
             n_epochs=10,
             gamma=0.99,
             gae_lambda=0.95,
@@ -164,14 +179,17 @@ def train(timesteps: int, model_path: Path, tyre_coefficients: dict,
     return model
 
 
-def run_inference(model_path: Path, tyre_coefficients: dict) -> dict:
+def run_inference(model_path: Path, tyre_coefficients: dict, env_kwargs=None) -> dict:
     """Run one full race episode and return the race log."""
     print(f"\n{'═' * 60}")
     print(f"  INFERENCE — Running agent race")
     print(f"{'═' * 60}\n")
 
+    if env_kwargs is None:
+        env_kwargs = {}
+
     model = PPO.load(str(model_path), device=DEVICE)
-    env = F1StrategyEnv(tyre_coefficients=tyre_coefficients)
+    env = F1StrategyEnv(tyre_coefficients=tyre_coefficients, **env_kwargs)
 
     obs, info = env.reset()
     done = False

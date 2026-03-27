@@ -20,7 +20,12 @@ for d in [CACHE_DIR, MODELS_DIR, PLOTS_DIR, LOGS_DIR, STATIC_DIR, TEMPLATES_DIR]
     d.mkdir(parents=True, exist_ok=True)
 
 # ─── Device (GPU if available) ───────────────────────────────────────────────
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+if torch.cuda.is_available():
+    DEVICE = "cuda"
+elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+    DEVICE = "mps"
+else:
+    DEVICE = "cpu"
 
 # ─── Race Parameters ─────────────────────────────────────────────────────────
 RACE_YEAR = 2023
@@ -30,10 +35,12 @@ TOTAL_LAPS = 57
 NUM_DRIVERS = 20
 REFERENCE_DRIVER = "VER"  # Verstappen — baseline for comparison
 
-# ─── Tyre Compounds ──────────────────────────────────────────────────────────
-COMPOUNDS = ["SOFT", "MEDIUM", "HARD"]
-COMPOUND_TO_IDX = {"SOFT": 0, "MEDIUM": 1, "HARD": 2}
-IDX_TO_COMPOUND = {v: k for k, v in COMPOUND_TO_IDX.items()}
+# ─── Tyre Compounds (dry + wet) ──────────────────────────────────────────────
+COMPOUNDS = ["SOFT", "MEDIUM", "HARD", "INTER", "WET"]
+COMPOUND_TO_IDX = {c: i for i, c in enumerate(COMPOUNDS)}
+IDX_TO_COMPOUND = {i: c for i, c in enumerate(COMPOUNDS)}
+DRY_COMPOUNDS = ["SOFT", "MEDIUM", "HARD"]
+WET_COMPOUNDS = ["INTER", "WET"]
 
 # ─── Environment Parameters ──────────────────────────────────────────────────
 STARTING_COMPOUND = "SOFT"
@@ -54,19 +61,45 @@ SAFETY_CAR_MAX_LAPS = 7         # maximum SC duration
 SAFETY_CAR_LAPTIME = 120.0      # lap time under safety car (seconds)
 GAP_NORMALIZER = 60.0           # max gap in seconds for normalization
 
+# ─── Weather System ──────────────────────────────────────────────────────────
+RAIN_PROBABILITY = 0.06         # ~6% chance per lap of rain starting
+RAIN_MIN_LAPS = 4               # minimum rain duration
+RAIN_MAX_LAPS = 12              # maximum rain duration
+RAIN_INTENSITY_LEVELS = 3       # 0=dry, 1=light, 2=heavy
+DRY_ON_WET_PENALTY = 8.0        # seconds/lap penalty for dry tyres in rain
+WET_ON_DRY_PENALTY = 5.0        # seconds/lap penalty for wet tyres on dry
+INTER_RAIN_BONUS = -1.5         # inters are optimal in light rain (negative=faster)
+WET_HEAVY_RAIN_BONUS = -2.0     # full wets are optimal in heavy rain
+
 # ─── Reward Shaping ──────────────────────────────────────────────────────────
 REWARD_POSITION_GAIN = 1.0      # reward per position gained
 REWARD_PIT_COST = -2.0          # penalty for making a pit stop
 REWARD_TYRE_CLIFF_PENALTY = -3.0  # penalty per lap beyond tyre cliff age
 REWARD_FINISH_BONUS_SCALE = 50.0  # end-of-race bonus: scale * (20 - final_pos)
 REWARD_SC_PIT_BONUS = 1.5       # bonus for pitting during safety car (free stop)
+REWARD_WRONG_TYRE_PENALTY = -4.0  # penalty for wrong compound in weather
 
 # ─── PPO Hyperparameters ─────────────────────────────────────────────────────
+import os
 PPO_LEARNING_RATE = 3e-4
-PPO_N_ENVS = 8                  # more parallel envs for GPU
+PPO_POLICY = "MlpPolicy"
 PPO_INITIAL_TIMESTEPS = 50_000
 PPO_FINAL_TIMESTEPS = 200_000
-PPO_POLICY = "MlpPolicy"
+
+# Hardware configurations
+if DEVICE == "cuda":
+    torch.backends.cudnn.benchmark = True  # Enable aggressive CUDA JIT optimizations
+    PPO_N_ENVS = 16                        # High parallelism for heavy GPU throughput
+    PPO_BATCH_SIZE = 256
+    PPO_N_STEPS = 2048
+elif DEVICE == "mps":
+    PPO_N_ENVS = 8                         # Balanced Apple Silicon scaling to avoid dispatch overhead
+    PPO_BATCH_SIZE = 128
+    PPO_N_STEPS = 1024
+else:
+    PPO_N_ENVS = max(1, os.cpu_count() or 4) # CPU scaling uses available cores
+    PPO_BATCH_SIZE = 64                      # Smaller batches reduce memory latency on CPU
+    PPO_N_STEPS = 512
 
 # ─── Model Paths ─────────────────────────────────────────────────────────────
 MODEL_INITIAL = MODELS_DIR / "f1_strategy_agent"

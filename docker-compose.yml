@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  stint-engine-backend:
+    build: .
+    container_name: stint_engine_api
+    ports:
+      - "5000:5000"
+    volumes:
+      # Mount cache and models so ML data persists across container restarts/rebuilds
+      - ./cache:/app/cache
+      - ./models:/app/models
+      - ./logs:/app/logs
+      - ./plots:/app/plots
+    environment:
+      - HOST=0.0.0.0
+      - PORT=5000
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          # Optional GPU pass-through if the host has Docker NVIDIA runtime enabled
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+        # Ignore GPU pass-through errors if host only has CPU or Mac MPS
+        # Docker Compose skips if driver strictly unsupported without failing

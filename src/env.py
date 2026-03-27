@@ -1,6 +1,6 @@
 """
-StintEngine — F1 Pit Stop Strategy Gymnasium Environment (Advanced)
-Custom Gym env with fuel load, safety car, tyre temperature, and gap tracking.
+StintEngine — F1 Pit Stop Strategy Gymnasium Environment (v2 — Weather)
+10D observation space with fuel, safety car, rain, and wet compound logic.
 """
 
 import gymnasium
@@ -14,34 +14,42 @@ from src.config import (
     COMPOUND_TO_IDX, IDX_TO_COMPOUND, COMPOUNDS,
     REWARD_POSITION_GAIN, REWARD_PIT_COST,
     REWARD_TYRE_CLIFF_PENALTY, REWARD_FINISH_BONUS_SCALE,
-    REWARD_SC_PIT_BONUS,
+    REWARD_SC_PIT_BONUS, REWARD_WRONG_TYRE_PENALTY,
     FUEL_LOAD_KG, FUEL_BURN_PER_LAP, FUEL_TIME_PENALTY,
     COLD_TYRE_PENALTY, COLD_TYRE_WARMUP_LAPS,
     SAFETY_CAR_PROBABILITY, SAFETY_CAR_MIN_LAPS, SAFETY_CAR_MAX_LAPS,
     SAFETY_CAR_LAPTIME, GAP_NORMALIZER,
+    RAIN_PROBABILITY, RAIN_MIN_LAPS, RAIN_MAX_LAPS,
+    DRY_ON_WET_PENALTY, WET_ON_DRY_PENALTY,
+    INTER_RAIN_BONUS, WET_HEAVY_RAIN_BONUS,
+    DRY_COMPOUNDS, WET_COMPOUNDS,
 )
 from src.tyre_model import predict_laptime, get_base_laptime
 
 
 class F1StrategyEnv(gymnasium.Env):
     """
-    Advanced F1 Pit Stop Strategy Environment.
+    Advanced F1 Pit Stop Strategy Environment v2 — with Weather.
 
-    Observation (8D, normalized [0,1]):
+    Observation (10D, normalized [0,1]):
         [0] lap_progress      — current_lap / total_laps
         [1] tyre_age           — normalised tyre age
-        [2] compound           — SOFT=0, MED=0.5, HARD=1
+        [2] compound           — SOFT=0, MED=0.25, HARD=0.5, INTER=0.75, WET=1.0
         [3] lap_time_delta     — delta from base lap time
         [4] position           — position / 20
         [5] fuel_load          — remaining fuel fraction
         [6] gap_to_leader      — normalised gap in seconds
         [7] safety_car         — 1.0 if SC active, else 0.0
+        [8] rain_intensity     — 0.0=dry, 0.5=light, 1.0=heavy
+        [9] is_raining         — 1.0 if rain active, else 0.0
 
-    Actions (Discrete(4)):
+    Actions (Discrete(6)):
         0 = Stay Out
         1 = Pit for Soft
         2 = Pit for Medium
         3 = Pit for Hard
+        4 = Pit for Intermediates
+        5 = Pit for Full Wets
     """
 
     metadata = {"render_modes": []}
@@ -51,11 +59,17 @@ class F1StrategyEnv(gymnasium.Env):
         tyre_coefficients: Optional[Dict] = None,
         total_laps: int = TOTAL_LAPS,
         render_mode: Optional[str] = None,
+        weather_mode: str = "Random",
+        sc_probability: float = SAFETY_CAR_PROBABILITY,
+        starting_position: int = STARTING_POSITION,
     ):
         super().__init__()
 
         self.total_laps = total_laps
         self.render_mode = render_mode
+        self.weather_mode = weather_mode
+        self.sc_probability = sc_probability
+        self.starting_pos_override = starting_position
 
         # Tyre degradation model
         if tyre_coefficients is None:
@@ -63,17 +77,24 @@ class F1StrategyEnv(gymnasium.Env):
                 "SOFT":   (91.0, 0.08, 0.003),
                 "MEDIUM": (91.5, 0.05, 0.002),
                 "HARD":   (92.0, 0.03, 0.001),
+                "INTER":  (93.0, 0.04, 0.001),  # slower on dry but durable
+                "WET":    (95.0, 0.03, 0.0008), # slowest on dry, very durable
             }
         else:
+            # Ensure wet compounds have defaults if not in fitted data
+            if "INTER" not in tyre_coefficients:
+                tyre_coefficients["INTER"] = (93.0, 0.04, 0.001)
+            if "WET" not in tyre_coefficients:
+                tyre_coefficients["WET"] = (95.0, 0.03, 0.0008)
             self.tyre_coefficients = tyre_coefficients
 
         self.base_laptime = get_base_laptime(self.tyre_coefficients)
 
-        # Spaces — 8D observation
+        # Spaces — 10D observation, 6 actions
         self.observation_space = spaces.Box(
-            low=0.0, high=1.0, shape=(8,), dtype=np.float32
+            low=0.0, high=1.0, shape=(10,), dtype=np.float32
         )
-        self.action_space = spaces.Discrete(4)
+        self.action_space = spaces.Discrete(6)
 
         # State (initialized in reset)
         self._init_state()
@@ -83,7 +104,7 @@ class F1StrategyEnv(gymnasium.Env):
         self.current_lap = 1
         self.tyre_age = 1
         self.compound = STARTING_COMPOUND
-        self.position = STARTING_POSITION
+        self.position = self.starting_pos_override
         self.last_laptime = self.base_laptime
         self.pit_stops = 0
         self.pit_laps: List[int] = []
@@ -95,27 +116,35 @@ class F1StrategyEnv(gymnasium.Env):
         self.gap_to_leader = 0.0
         self.safety_car_active = False
         self.safety_car_laps_remaining = 0
-        self.cold_tyre_laps = 0  # laps remaining of cold-tyre penalty
+        self.cold_tyre_laps = 0
+
+        # Weather state
+        self.is_raining = (self.weather_mode == "Force Rain")
+        self.rain_intensity = 2 if self.is_raining else 0
+        self.rain_laps_remaining = 999 if self.is_raining else 0
 
         # Race log for UI replay
         self.race_log: List[dict] = []
 
     def _get_obs(self) -> np.ndarray:
-        """Build normalised 8D observation vector."""
-        compound_norm = COMPOUND_TO_IDX[self.compound] / 2.0
+        """Build normalised 10D observation vector."""
+        compound_norm = COMPOUND_TO_IDX[self.compound] / (len(COMPOUNDS) - 1)
         lap_delta = np.clip((self.last_laptime - self.base_laptime) / 10.0, 0.0, 1.0)
         fuel_frac = max(self.fuel_kg / FUEL_LOAD_KG, 0.0)
         gap_norm = np.clip(self.gap_to_leader / GAP_NORMALIZER, 0.0, 1.0)
+        rain_norm = self.rain_intensity / 2.0  # 0, 0.5, 1.0
 
         return np.array([
-            self.current_lap / self.total_laps,
-            min(self.tyre_age / MAX_TYRE_AGE, 1.0),
-            compound_norm,
-            lap_delta,
-            self.position / NUM_DRIVERS,
-            fuel_frac,
-            gap_norm,
-            1.0 if self.safety_car_active else 0.0,
+            self.current_lap / self.total_laps,       # [0] lap progress
+            min(self.tyre_age / MAX_TYRE_AGE, 1.0),   # [1] tyre age
+            compound_norm,                              # [2] compound type
+            lap_delta,                                  # [3] lap time delta
+            self.position / NUM_DRIVERS,               # [4] position
+            fuel_frac,                                  # [5] fuel load
+            gap_norm,                                   # [6] gap to leader
+            1.0 if self.safety_car_active else 0.0,    # [7] safety car
+            rain_norm,                                  # [8] rain intensity
+            1.0 if self.is_raining else 0.0,           # [9] is raining
         ], dtype=np.float32)
 
     def _get_info(self) -> dict:
@@ -131,6 +160,8 @@ class F1StrategyEnv(gymnasium.Env):
             "gap_to_leader": round(self.gap_to_leader, 2),
             "safety_car": self.safety_car_active,
             "cumulative_time": round(self.cumulative_time, 3),
+            "is_raining": self.is_raining,
+            "rain_intensity": self.rain_intensity,
         }
 
     def _log_lap(self, action: int, reward: float):
@@ -140,6 +171,31 @@ class F1StrategyEnv(gymnasium.Env):
             "action": action,
             "reward": round(reward, 3),
         })
+
+    def _weather_penalty(self) -> float:
+        """Calculate penalty/bonus for tyre-weather mismatch."""
+        if self.is_raining:
+            # Rain is active
+            if self.compound in DRY_COMPOUNDS:
+                # Dry tyres in rain = dangerous + slow
+                return DRY_ON_WET_PENALTY * (1 + self.rain_intensity * 0.5)
+            elif self.compound == "INTER":
+                if self.rain_intensity == 1:
+                    return INTER_RAIN_BONUS  # optimal
+                elif self.rain_intensity == 2:
+                    return 1.5  # inters struggle in heavy rain
+                return 0.0
+            elif self.compound == "WET":
+                if self.rain_intensity == 2:
+                    return WET_HEAVY_RAIN_BONUS  # optimal
+                elif self.rain_intensity == 1:
+                    return 0.5  # full wets overkill in light rain
+                return 0.0
+        else:
+            # Dry conditions
+            if self.compound in WET_COMPOUNDS:
+                return WET_ON_DRY_PENALTY  # wet tyres on dry = very slow
+        return 0.0
 
     def reset(self, seed: Optional[int] = None, options: Optional[dict] = None):
         super().reset(seed=seed)
@@ -154,6 +210,33 @@ class F1StrategyEnv(gymnasium.Env):
         pitted_this_lap = False
 
         # ══════════════════════════════════════════════════════════════════
+        # WEATHER SYSTEM
+        # ══════════════════════════════════════════════════════════════════
+        if self.weather_mode == "Force Rain":
+            self.is_raining = True
+            self.rain_intensity = 2
+            self.rain_laps_remaining = 999
+        elif self.weather_mode == "Force Dry":
+            self.is_raining = False
+            self.rain_intensity = 0
+            self.rain_laps_remaining = 0
+        else:
+            if self.is_raining:
+                self.rain_laps_remaining -= 1
+                if self.rain_laps_remaining <= 0:
+                    self.is_raining = False
+                    self.rain_intensity = 0
+                elif self.np_random.random() < 0.15:
+                    self.rain_intensity = self.np_random.integers(1, 3)
+            else:
+                if self.np_random.random() < RAIN_PROBABILITY:
+                    self.is_raining = True
+                    self.rain_intensity = self.np_random.integers(1, 3)
+                    self.rain_laps_remaining = self.np_random.integers(
+                        RAIN_MIN_LAPS, RAIN_MAX_LAPS + 1
+                    )
+
+        # ══════════════════════════════════════════════════════════════════
         # SAFETY CAR LOGIC
         # ══════════════════════════════════════════════════════════════════
         if self.safety_car_active:
@@ -161,8 +244,10 @@ class F1StrategyEnv(gymnasium.Env):
             if self.safety_car_laps_remaining <= 0:
                 self.safety_car_active = False
         else:
-            # Random SC deployment
-            if self.np_random.random() < SAFETY_CAR_PROBABILITY:
+            sc_prob = self.sc_probability
+            if self.is_raining:
+                sc_prob *= 2.5  # rain increases SC chance
+            if self.np_random.random() < sc_prob:
                 self.safety_car_active = True
                 self.safety_car_laps_remaining = self.np_random.integers(
                     SAFETY_CAR_MIN_LAPS, SAFETY_CAR_MAX_LAPS + 1
@@ -183,11 +268,9 @@ class F1StrategyEnv(gymnasium.Env):
                 self.cold_tyre_laps = COLD_TYRE_WARMUP_LAPS
 
                 if self.safety_car_active:
-                    # Free pit stop under SC — minimal position loss
                     positions_lost = self.np_random.integers(0, 2)
                     reward += REWARD_SC_PIT_BONUS
                 else:
-                    # Normal pit: lose ~15 positions worth of time
                     positions_lost = int(PIT_STOP_TIME_LOSS / 1.5)
                     positions_lost = max(1, positions_lost + self.np_random.integers(-2, 3))
 
@@ -216,16 +299,24 @@ class F1StrategyEnv(gymnasium.Env):
                 self.last_laptime += COLD_TYRE_PENALTY * warmup_factor
                 self.cold_tyre_laps -= 1
 
+            # Weather tyre mismatch penalty/bonus
+            weather_delta = self._weather_penalty()
+            self.last_laptime += weather_delta
+            if abs(weather_delta) > 3.0:
+                reward += REWARD_WRONG_TYRE_PENALTY
+
         # Burn fuel
         self.fuel_kg = max(0.0, self.fuel_kg - FUEL_BURN_PER_LAP)
 
         # Update cumulative time
         self.cumulative_time += self.last_laptime
 
-        # Leader time (simplified: best possible time each lap)
+        # Leader time (simplified)
         leader_lap = self.base_laptime + max(0, self.fuel_kg * FUEL_TIME_PENALTY * 0.8)
         if self.safety_car_active:
             leader_lap = SAFETY_CAR_LAPTIME
+        if self.is_raining:
+            leader_lap += 3.0 * self.rain_intensity  # leader also slowed by rain
         self.leader_time += leader_lap
         self.gap_to_leader = max(0.0, self.cumulative_time - self.leader_time)
 
@@ -271,7 +362,7 @@ class F1StrategyEnv(gymnasium.Env):
 
 # ─── Quick smoke test ─────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    print("Running Advanced F1StrategyEnv smoke test...\n")
+    print("Running F1StrategyEnv v2 (Weather) smoke test...\n")
 
     env = F1StrategyEnv()
 
@@ -280,6 +371,7 @@ if __name__ == "__main__":
         total_reward = 0.0
         done = False
         sc_laps = 0
+        rain_laps = 0
 
         while not done:
             action = env.action_space.sample()
@@ -288,14 +380,16 @@ if __name__ == "__main__":
             done = terminated or truncated
             if info.get("safety_car"):
                 sc_laps += 1
+            if info.get("is_raining"):
+                rain_laps += 1
 
         print(f"Ep {ep+1}: Pos=P{info['position']}, Pits={info['pit_stops']}, "
-              f"SC Laps={sc_laps}, Fuel={info['fuel_kg']:.1f}kg, "
-              f"Gap={info['gap_to_leader']:.1f}s, Reward={total_reward:.2f}")
+              f"SC={sc_laps}L, Rain={rain_laps}L, "
+              f"Fuel={info['fuel_kg']:.1f}kg, Reward={total_reward:.2f}")
 
-    print("\n✓ Advanced smoke test passed")
+    print("\n✓ Weather smoke test passed")
 
     print("\nRunning check_env()...")
     from gymnasium.utils.env_checker import check_env
     check_env(env, skip_render_check=True)
-    print("✓ check_env passed (8D observation space)")
+    print("✓ check_env passed (10D observation space)")
