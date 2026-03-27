@@ -1,0 +1,25 @@
+name: Sync to Hugging Face Space
+
+on:
+  push:
+    branches: [ "master", "main" ]
+
+jobs:
+  sync-to-hub:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to Hugging Face
+        env:
+          # You must add HF_TOKEN as a Repository Secret in GitHub settings
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          # If your space is named differently (e.g., stintengine-api instead of StintEngine-API), update the URL below:
+          git remote add space https://const-nishant:$HF_TOKEN@huggingface.co/spaces/const-nishant/StintEngine-API
+          
+          # This forces our local master branch to become the Space's main branch
+          git push --force space master:main
