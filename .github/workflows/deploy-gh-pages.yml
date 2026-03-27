@@ -40,3 +40,5 @@ jobs:
           publish_dir: ./dist
           publish_branch: gh-pages
           commit_message: "Deploy updated frontend to GitHub Pages"
+          # To use a custom domain (e.g. f1.yourdomain.com), uncomment the line below and add your domain:
+          # cname: f1.yourdomain.com
