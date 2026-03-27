@@ -13,6 +13,9 @@ let raceData = {};
 let rewardHistory = [];
 let telemetryLaps = [];
 
+// Production API URL Default
+window.API_BASE = 'https://const-nishant-stintengine-api.hf.space';
+
 const DRIVER_COLORS = ['#2979FF', '#FF3333', '#00e676', '#FFD700', '#E040FB'];
 let driverColorMap = {};
 
@@ -47,7 +50,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ─── SSE Connection ──────────────────────────────────────────────────────────
 function connectSSE() {
     if (eventSource) eventSource.close();
-    eventSource = new EventSource('/api/stream');
+    eventSource = new EventSource(`${window.API_BASE}/api/stream`);
 
     eventSource.addEventListener('connected', (e) => {
         const data = JSON.parse(e.data);
@@ -180,7 +183,8 @@ function connectSSE() {
 // ─── API Helpers ─────────────────────────────────────────────────────────────
 async function api(url, options = {}) {
     try {
-        const res = await fetch(url, {
+        const fetchUrl = url.startsWith('http') ? url : `${window.API_BASE}${url}`;
+        const res = await fetch(fetchUrl, {
             headers: { 'Content-Type': 'application/json' },
             ...options,
         });
@@ -314,7 +318,8 @@ function initSettings() {
 function loadSettings() {
     initSettings();
     const settings = JSON.parse(localStorage.getItem('stintSettings') || '{}');
-    if (settings.apiBase) document.getElementById('apiBaseInput').value = settings.apiBase;
+    window.API_BASE = settings.apiBase || 'https://const-nishant-stintengine-api.hf.space';
+    document.getElementById('apiBaseInput').value = window.API_BASE;
     if (settings.year) document.getElementById('yearInput').value = settings.year;
     
     // Set track if valid, otherwise default to bahrain
@@ -364,7 +369,7 @@ function saveSettings() {
     showToast('Settings saved successfully');
     
     // Update global state if needed
-    window.API_BASE = settings.apiBase || 'http://127.0.0.1:5000';
+    window.API_BASE = settings.apiBase || 'https://const-nishant-stintengine-api.hf.space';
     
     // Force a reload of the track visualization
     if (typeof loadTrack === 'function') {
